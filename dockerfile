@@ -30,10 +30,12 @@ RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
     && apt-get install -y nodejs
 
 # ⚡ Opcional: si quieres correr build de Vite dentro del contenedor
-# RUN npm install
+RUN composer install
+ RUN npm install
 # RUN npm run build
 
 # Configure PHP (display errors)
 RUN sed -i 's/display_errors = Off/display_errors = On/g' /etc/php/8.3/fpm/php.ini
 RUN sed -i 's/display_errors = Off/display_errors = On/g' /etc/php/8.3/cli/php.ini
 RUN sed -i 's/error_reporting = E_ALL & ~E_DEPRECATED & ~E_STRICT/error_reporting = E_ALL/g' /etc/php/8.3/fpm/php.ini
+
