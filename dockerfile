@@ -1,42 +1,103 @@
-# Define the base image
-FROM teguh02/laravel-filament:latest
+# Usar imagen oficial de PHP con Apache
+FROM php:8.3-apache
 
-# Set user to root
-USER root
+# Instalar dependencias del sistema
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    libpng-dev \
+    libonig-dev \
+    libxml2-dev \
+    libzip-dev \
+    zip \
+    unzip \
+    nodejs \
+    npm \
+    default-mysql-client \
+    && rm -rf /var/lib/apt/lists/*
 
-# Change the working directory
-WORKDIR /var/www
+# Instalar extensiones PHP necesarias para Laravel
+RUN docker-php-ext-install \
+    pdo_mysql \
+    mbstring \
+    exif \
+    pcntl \
+    bcmath \
+    gd \
+    zip
 
-# Remove all files in /var/www/html directory
-RUN rm -rf /var/www/html/*
+# Instalar Composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# Copy only the public directory into /var/www/html
-COPY ./public /var/www/html
+# Habilitar mod_rewrite de Apache
+RUN a2enmod rewrite
 
-# Copy the entire project (including vendor and node_modules)
-COPY . /var/www
+# Configurar Apache para Laravel
+RUN echo '<VirtualHost *:80>\n\
+    DocumentRoot /var/www/html/public\n\
+    <Directory /var/www/html/public>\n\
+        Options Indexes FollowSymLinks\n\
+        AllowOverride All\n\
+        Require all granted\n\
+    </Directory>\n\
+    ErrorLog ${APACHE_LOG_DIR}/error.log\n\
+    CustomLog ${APACHE_LOG_DIR}/access.log combined\n\
+</VirtualHost>' > /etc/apache2/sites-available/000-default.conf
 
-# Set directory permissions
-RUN chmod -R 777 /var/www
+# Establecer directorio de trabajo
+WORKDIR /var/www/html
 
-# Install MySQL client
-RUN apt-get update && apt-get install -y default-mysql-client curl unzip git
+# Copiar archivos de configuración primero (para cache de Docker)
+COPY composer.json composer.lock package.json package-lock.json ./
 
-# Install Composer
-RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+# Instalar dependencias PHP
+RUN composer install --no-dev --no-scripts --no-autoloader --optimize-autoloader
 
-# Install Node.js and npm (LTS version)
-RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
-    && apt-get install -y nodejs
+# Instalar dependencias Node.js
+RUN npm ci --only=production
 
-# ⚡ Opcional: si quieres correr build de Vite dentro del contenedor
-RUN composer install
-RUN npm install
-# RUN npm run build
+# Copiar el resto del código
+COPY . .
 
-# Configure PHP (display errors)
-RUN sed -i 's/display_errors = Off/display_errors = On/g' /etc/php/8.3/fpm/php.ini
-RUN sed -i 's/display_errors = Off/display_errors = On/g' /etc/php/8.3/cli/php.ini
-RUN sed -i 's/error_reporting = E_ALL & ~E_DEPRECATED & ~E_STRICT/error_reporting = E_ALL/g' /etc/php/8.3/fpm/php.ini
+# Completar instalación de Composer
+RUN composer dump-autoload --optimize
 
+# Compilar assets para producción
+RUN npm run build
 
+# Crear directorios necesarios y establecer permisos seguros
+RUN mkdir -p storage/logs storage/framework/{cache,sessions,views} bootstrap/cache \
+    && chown -R www-data:www-data storage bootstrap/cache \
+    && chmod -R 775 storage bootstrap/cache
+
+# Configurar PHP para producción
+RUN cp /usr/local/etc/php/php.ini-production /usr/local/etc/php/php.ini
+
+# Limpiar archivos innecesarios
+RUN npm cache clean --force \
+    && rm -rf node_modules \
+    && rm -rf /tmp/*
+
+# Exponer puerto 80
+EXPOSE 80
+
+# Script de inicio
+RUN echo '#!/bin/bash\n\
+# Generar APP_KEY si no existe\n\
+if [ -z "$APP_KEY" ]; then\n\
+    php artisan key:generate --force\n\
+fi\n\
+# Optimizar para producción\n\
+php artisan config:cache\n\
+php artisan route:cache\n\
+php artisan view:cache\n\
+# Ejecutar migraciones si es necesario\n\
+if [ "$RUN_MIGRATIONS" = "true" ]; then\n\
+    php artisan migrate --force\n\
+fi\n\
+# Iniciar Apache\n\
+apache2-foreground' > /usr/local/bin/start.sh \
+    && chmod +x /usr/local/bin/start.sh
+
+# Comando por defecto
+CMD ["/usr/local/bin/start.sh"]
