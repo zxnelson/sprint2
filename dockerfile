@@ -7,12 +7,13 @@ RUN apt-get update && apt-get install -y \
     libpng-dev \
     libonig-dev \
     libxml2-dev \
+    libicu-dev \
     zip \
     unzip \
     libzip-dev
 
 # Instalar extensiones de PHP
-RUN docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip
+RUN docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip intl
 
 # Instalar Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
@@ -33,7 +34,9 @@ RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cac
 
 # Instalar dependencias de Composer
 WORKDIR /var/www/html
-RUN composer install --no-dev --optimize-autoloader
+
+# Actualizar composer.lock para resolver conflictos
+RUN composer update inertiajs/inertia-laravel --no-dev --optimize-autoloader
 
 # Exponer puerto
 EXPOSE 80
@@ -43,4 +46,3 @@ CMD php artisan config:cache && \
     php artisan route:cache && \
     php artisan view:cache && \
     apache2-foreground
-
