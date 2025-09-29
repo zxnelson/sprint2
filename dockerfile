@@ -1,46 +1,46 @@
-# Define the base image
-FROM teguh02/laravel-filament:latest
-# Set user to root
-USER root
-# Change the working directory
-WORKDIR /var/www
-# Remove all files in /var/www/html directory
-RUN rm -rf /var/www/html/*
-# Copy only the public directory into /var/www/html
-COPY ./public /var/www/html
-# Copy the entire project (including vendor and node_modules)
-COPY . /var/www
-# Set directory permissions
-RUN chmod -R 777 /var/www
-# Install MySQL client
-RUN apt-get update && apt-get install -y default-mysql-client curl unzip git
-# Install Composer
-RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
-# Install Node.js and npm (LTS version)
-RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
-    && apt-get install -y nodejs
-# ⚡ Opcional: si quieres correr build de Vite dentro del contenedor
-# RUN npm install
-# RUN npm run build
-# Configure PHP (display errors)
-RUN sed -i 's/display_errors = Off/display_errors = On/g' /etc/php/8.3/fpm/php.ini
-RUN sed -i 's/display_errors = Off/display_errors = On/g' /etc/php/8.3/cli/php.ini
-RUN sed -i 's/error_reporting = E_ALL & ~E_DEPRECATED & ~E_STRICT/error_reporting = E_ALL/g' /etc/php/8.3/fpm/php.ini
+FROM php:8.2-apache
 
-# SOLO AGREGAMOS ESTO AL FINAL:
-# Exponer puerto para Render
+# Instalar dependencias del sistema
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    libpng-dev \
+    libonig-dev \
+    libxml2-dev \
+    zip \
+    unzip \
+    libzip-dev
+
+# Instalar extensiones de PHP
+RUN docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip
+
+# Instalar Composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+# Habilitar mod_rewrite de Apache
+RUN a2enmod rewrite
+
+# Configurar DocumentRoot
+ENV APACHE_DOCUMENT_ROOT /var/www/html/public
+RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf
+RUN sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
+
+# Copiar archivos del proyecto
+COPY . /var/www/html
+
+# Establecer permisos
+RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
+
+# Instalar dependencias de Composer
+WORKDIR /var/www/html
+RUN composer install --no-dev --optimize-autoloader
+
+# Exponer puerto
 EXPOSE 80
 
-# Crear script de inicio simple
-RUN echo '#!/bin/bash\n\
-cd /var/www\n\
-# Generar APP_KEY si no existe\n\
-if [ -z "$APP_KEY" ]; then\n\
-    php artisan key:generate --force\n\
-fi\n\
-# Iniciar servicios (supervisord viene con la imagen base)\n\
-exec supervisord -c /etc/supervisor/conf.d/supervisord.conf' > /start.sh \
-    && chmod +x /start.sh
-
 # Comando de inicio
-CMD ["/start.sh"]
+CMD php artisan config:cache && \
+    php artisan route:cache && \
+    php artisan view:cache && \
+    apache2-foreground
+
