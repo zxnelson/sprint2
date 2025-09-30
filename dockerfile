@@ -1,4 +1,4 @@
-FROM php:8.2-apache
+FROM php:8.0-apache
 
 # Instalar dependencias del sistema
 RUN apt-get update && apt-get install -y \
@@ -46,3 +46,4 @@ CMD php artisan config:cache && \
     php artisan route:cache && \
     php artisan view:cache && \
     apache2-foreground
+
